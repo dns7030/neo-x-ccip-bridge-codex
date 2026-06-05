@@ -72,6 +72,21 @@ function writeHistory(items: Tracker[]) {
   window.localStorage.setItem(HISTORY_KEY, JSON.stringify(items.slice(0, 12)));
 }
 
+function mergeHistory(...lists: Tracker[][]) {
+  const byId = new Map<string, Tracker>();
+  for (const list of lists) {
+    for (const item of list) {
+      const existing = byId.get(item.id);
+      byId.set(item.id, {
+        ...existing,
+        ...item,
+        messageId: item.messageId || existing?.messageId || ""
+      });
+    }
+  }
+  return [...byId.values()].sort((a, b) => b.submittedAt - a.submittedAt).slice(0, 12);
+}
+
 function App() {
   const [account, setAccount] = useState("");
   const [direction, setDirection] = useState<Direction>("forward");
@@ -147,7 +162,7 @@ function App() {
   const saveTracker = useCallback((next: Tracker) => {
     setTracker(next);
     setHistory((current) => {
-      const updated = [next, ...current.filter((item) => item.id !== next.id)].slice(0, 12);
+      const updated = mergeHistory([next], current);
       writeHistory(updated);
       return updated;
     });
@@ -176,6 +191,63 @@ function App() {
     }
   }, [account, neoProvider, ready, sepoliaProvider]);
 
+  const loadBridgeHistory = useCallback(async () => {
+    if (!account || !ready || !neoProvider) return;
+
+    const sourceBridge = new Contract(config.sourceBridge, sourceBridgeAbi, sepoliaProvider);
+    const destinationBridge = new Contract(config.destinationBridge, destinationBridgeAbi, neoProvider);
+
+    const [forwardEvents, reverseEvents] = await Promise.all([
+      sourceBridge.queryFilter(
+        sourceBridge.filters.BridgeRequested(null, account, null),
+        config.sourceBridgeDeployBlock
+      ),
+      destinationBridge.queryFilter(
+        destinationBridge.filters.ReturnRequested(null, account, null),
+        config.destinationBridgeDeployBlock
+      )
+    ]);
+
+    const blockTimes = new Map<string, number>();
+    async function blockTime(provider: JsonRpcProvider, blockNumber: number) {
+      const key = `${provider === sepoliaProvider ? "sepolia" : "neo"}:${blockNumber}`;
+      const cached = blockTimes.get(key);
+      if (cached) return cached;
+      const block = await provider.getBlock(blockNumber);
+      const timestamp = (block?.timestamp || Math.floor(Date.now() / 1000)) * 1000;
+      blockTimes.set(key, timestamp);
+      return timestamp;
+    }
+
+    const forwardHistory = await Promise.all(
+      forwardEvents.map(async (event: any) => ({
+        id: event.transactionHash,
+        direction: "forward" as Direction,
+        amount: formatUnits(event.args.amount, 6),
+        submittedAt: await blockTime(sepoliaProvider, event.blockNumber),
+        originTxHash: event.transactionHash,
+        messageId: event.args.messageId
+      }))
+    );
+
+    const reverseHistory = await Promise.all(
+      reverseEvents.map(async (event: any) => ({
+        id: event.transactionHash,
+        direction: "reverse" as Direction,
+        amount: formatUnits(event.args.amount, 6),
+        submittedAt: await blockTime(neoProvider, event.blockNumber),
+        originTxHash: event.transactionHash,
+        messageId: event.args.messageId
+      }))
+    );
+
+    setHistory((current) => {
+      const updated = mergeHistory(forwardHistory, reverseHistory, current, readHistory());
+      writeHistory(updated);
+      return updated;
+    });
+  }, [account, neoProvider, ready, sepoliaProvider]);
+
   useEffect(() => {
     refreshBalances().catch(() => undefined);
   }, [refreshBalances]);
@@ -183,6 +255,10 @@ function App() {
   useEffect(() => {
     setHistory(readHistory());
   }, []);
+
+  useEffect(() => {
+    loadBridgeHistory().catch(() => undefined);
+  }, [loadBridgeHistory]);
 
   useEffect(() => {
     if (!tracker || status === "done") return undefined;
@@ -387,7 +463,10 @@ function App() {
               <span>Neo X xUSDC</span>
               <strong>{destinationBalance}</strong>
             </div>
-            <button className="secondary" onClick={refreshBalances} disabled={!account}>
+            <button className="secondary" onClick={() => {
+              refreshBalances().catch(() => undefined);
+              loadBridgeHistory().catch(() => undefined);
+            }} disabled={!account}>
               Refresh
             </button>
 

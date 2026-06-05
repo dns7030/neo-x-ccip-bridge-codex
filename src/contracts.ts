@@ -18,7 +18,9 @@ export const config = {
   sourceBridge: import.meta.env.VITE_SOURCE_BRIDGE_ADDRESS || "",
   destinationBridge: import.meta.env.VITE_DESTINATION_BRIDGE_ADDRESS || "",
   xusdc: import.meta.env.VITE_XUSDC_ADDRESS || "",
-  sepoliaUsdc: import.meta.env.VITE_SEPOLIA_USDC || "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238"
+  sepoliaUsdc: import.meta.env.VITE_SEPOLIA_USDC || "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238",
+  sourceBridgeDeployBlock: Number(import.meta.env.VITE_SOURCE_BRIDGE_DEPLOY_BLOCK || 10987134),
+  destinationBridgeDeployBlock: Number(import.meta.env.VITE_DESTINATION_BRIDGE_DEPLOY_BLOCK || 8345274)
 };
 
 export const erc20Abi = [
