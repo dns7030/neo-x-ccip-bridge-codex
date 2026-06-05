@@ -33,13 +33,6 @@ function isAddressLike(value: string) {
   return /^0x[a-fA-F0-9]{40}$/.test(value);
 }
 
-function formatElapsed(startedAt: number, now: number) {
-  const seconds = Math.max(0, Math.floor((now - startedAt) / 1000));
-  const minutes = Math.floor(seconds / 60);
-  const remainder = seconds % 60;
-  return `${minutes}:${remainder.toString().padStart(2, "0")}`;
-}
-
 function formatSubmittedAt(value: number) {
   return new Intl.DateTimeFormat(undefined, {
     hour: "2-digit",
@@ -97,7 +90,6 @@ function App() {
   const [messageId, setMessageId] = useState("");
   const [tracker, setTracker] = useState<Tracker | null>(null);
   const [history, setHistory] = useState<Tracker[]>([]);
-  const [now, setNow] = useState(Date.now());
   const [status, setStatus] = useState<TxState>("idle");
   const [error, setError] = useState("");
 
@@ -260,12 +252,6 @@ function App() {
     loadBridgeHistory().catch(() => undefined);
   }, [loadBridgeHistory]);
 
-  useEffect(() => {
-    if (!tracker || status === "done") return undefined;
-    const timer = window.setInterval(() => setNow(Date.now()), 1000);
-    return () => window.clearInterval(timer);
-  }, [status, tracker]);
-
   const bridge = useCallback(async () => {
     setError("");
     setMessageId("");
@@ -327,7 +313,6 @@ function App() {
         originTxHash: tx.hash,
         messageId: ""
       };
-      setNow(submittedAt);
       saveTracker(pendingTracker);
 
       const receipt = await tx.wait();
@@ -427,7 +412,6 @@ function App() {
                     <Clock size={16} />
                     Submitted {formatSubmittedAt(tracker.submittedAt)}
                   </span>
-                  <strong>{formatElapsed(tracker.submittedAt, now)}</strong>
                 </div>
                 <div className="tracker-links">
                   <a href={sourceTxUrl} target="_blank" rel="noreferrer">
