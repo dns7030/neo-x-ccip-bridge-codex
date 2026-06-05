@@ -2,7 +2,8 @@ export const SEPOLIA = {
   chainId: 11155111,
   chainIdHex: "0xaa36a7",
   name: "Ethereum Sepolia",
-  explorer: "https://sepolia.etherscan.io"
+  explorer: "https://sepolia.etherscan.io",
+  rpcUrl: import.meta.env.VITE_SEPOLIA_RPC_URL || "https://ethereum-sepolia-rpc.publicnode.com"
 };
 
 export const NEO_X_T4 = {

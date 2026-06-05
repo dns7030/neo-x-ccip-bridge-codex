@@ -34,6 +34,7 @@ function App() {
   const ready = config.sourceBridge && config.destinationBridge && config.xusdc && config.sepoliaUsdc;
   const targetRecipient = recipient || account;
 
+  const sepoliaProvider = useMemo(() => new JsonRpcProvider(SEPOLIA.rpcUrl), []);
   const neoProvider = useMemo(() => {
     if (!NEO_X_T4.rpcUrl) return null;
     return new JsonRpcProvider(NEO_X_T4.rpcUrl);
@@ -61,8 +62,7 @@ function App() {
   const refreshBalances = useCallback(async () => {
     if (!account || !window.ethereum || !ready) return;
 
-    const browserProvider = new BrowserProvider(window.ethereum);
-    const usdc = new Contract(config.sepoliaUsdc, erc20Abi, browserProvider);
+    const usdc = new Contract(config.sepoliaUsdc, erc20Abi, sepoliaProvider);
     const sourceRaw = await usdc.balanceOf(account);
     setSourceBalance(formatUnits(sourceRaw, 6));
 
@@ -71,7 +71,7 @@ function App() {
       const destinationRaw = await xusdc.balanceOf(account);
       setDestinationBalance(formatUnits(destinationRaw, 6));
     }
-  }, [account, neoProvider, ready]);
+  }, [account, neoProvider, ready, sepoliaProvider]);
 
   useEffect(() => {
     refreshBalances().catch(() => undefined);
