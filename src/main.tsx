@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { ArrowRightLeft, CheckCircle2, CircleAlert, Clock, ExternalLink, Loader2, Wallet } from "lucide-react";
 import { BrowserProvider, Contract, JsonRpcProvider, formatUnits, parseUnits } from "ethers";
-import { NEO_X_T4, SEPOLIA, config, erc20Abi, sourceBridgeAbi } from "./contracts";
+import { NEO_X_T4, SEPOLIA, config, destinationBridgeAbi, erc20Abi, sourceBridgeAbi } from "./contracts";
 import "./styles.css";
 
 declare global {
@@ -12,12 +12,18 @@ declare global {
 }
 
 type TxState = "idle" | "approving" | "bridging" | "done";
+type Direction = "forward" | "reverse";
 
 type Tracker = {
+  id: string;
+  direction: Direction;
+  amount: string;
   submittedAt: number;
-  sourceTxHash: string;
+  originTxHash: string;
   messageId: string;
 };
+
+const HISTORY_KEY = "neo-x-ccip-bridge-history";
 
 function shortAddress(address: string) {
   return `${address.slice(0, 6)}...${address.slice(-4)}`;
@@ -42,20 +48,52 @@ function formatSubmittedAt(value: number) {
   }).format(value);
 }
 
+function originExplorer(direction: Direction) {
+  return direction === "forward" ? SEPOLIA.explorer : NEO_X_T4.explorer;
+}
+
+function originLabel(direction: Direction) {
+  return direction === "forward" ? "Sepolia tx" : "Neo X tx";
+}
+
+function routeLabel(direction: Direction) {
+  return direction === "forward" ? "Sepolia -> Neo X" : "Neo X -> Sepolia";
+}
+
+function readHistory(): Tracker[] {
+  try {
+    return JSON.parse(window.localStorage.getItem(HISTORY_KEY) || "[]");
+  } catch {
+    return [];
+  }
+}
+
+function writeHistory(items: Tracker[]) {
+  window.localStorage.setItem(HISTORY_KEY, JSON.stringify(items.slice(0, 12)));
+}
+
 function App() {
   const [account, setAccount] = useState("");
+  const [direction, setDirection] = useState<Direction>("forward");
   const [amount, setAmount] = useState("");
   const [recipient, setRecipient] = useState("");
   const [sourceBalance, setSourceBalance] = useState("0");
   const [destinationBalance, setDestinationBalance] = useState("0");
   const [messageId, setMessageId] = useState("");
   const [tracker, setTracker] = useState<Tracker | null>(null);
+  const [history, setHistory] = useState<Tracker[]>([]);
   const [now, setNow] = useState(Date.now());
   const [status, setStatus] = useState<TxState>("idle");
   const [error, setError] = useState("");
 
   const ready = config.sourceBridge && config.destinationBridge && config.xusdc && config.sepoliaUsdc;
   const targetRecipient = recipient || account;
+  const route = {
+    from: direction === "forward" ? "Ethereum Sepolia" : "Neo X T4",
+    to: direction === "forward" ? "Neo X T4" : "Ethereum Sepolia",
+    token: direction === "forward" ? "USDC" : "xUSDC",
+    button: direction === "forward" ? "Bridge to Neo X" : "Bridge back to Sepolia"
+  };
 
   const sepoliaProvider = useMemo(() => new JsonRpcProvider(SEPOLIA.rpcUrl), []);
   const neoProvider = useMemo(() => {
@@ -82,6 +120,48 @@ function App() {
     });
   }, []);
 
+  const switchToNeoX = useCallback(async () => {
+    if (!window.ethereum) return;
+    try {
+      await window.ethereum.request({
+        method: "wallet_switchEthereumChain",
+        params: [{ chainId: NEO_X_T4.chainIdHex }]
+      });
+    } catch (caught: any) {
+      if (caught?.code !== 4902) throw caught;
+      await window.ethereum.request({
+        method: "wallet_addEthereumChain",
+        params: [
+          {
+            chainId: NEO_X_T4.chainIdHex,
+            chainName: NEO_X_T4.name,
+            nativeCurrency: { name: "GAS", symbol: "GAS", decimals: 18 },
+            rpcUrls: [NEO_X_T4.rpcUrl],
+            blockExplorerUrls: [NEO_X_T4.explorer]
+          }
+        ]
+      });
+    }
+  }, []);
+
+  const saveTracker = useCallback((next: Tracker) => {
+    setTracker(next);
+    setHistory((current) => {
+      const updated = [next, ...current.filter((item) => item.id !== next.id)].slice(0, 12);
+      writeHistory(updated);
+      return updated;
+    });
+  }, []);
+
+  const updateTracker = useCallback((id: string, updates: Partial<Tracker>) => {
+    setTracker((current) => (current?.id === id ? { ...current, ...updates } : current));
+    setHistory((current) => {
+      const updated = current.map((item) => (item.id === id ? { ...item, ...updates } : item));
+      writeHistory(updated);
+      return updated;
+    });
+  }, []);
+
   const refreshBalances = useCallback(async () => {
     if (!account || !window.ethereum || !ready) return;
 
@@ -99,6 +179,10 @@ function App() {
   useEffect(() => {
     refreshBalances().catch(() => undefined);
   }, [refreshBalances]);
+
+  useEffect(() => {
+    setHistory(readHistory());
+  }, []);
 
   useEffect(() => {
     if (!tracker || status === "done") return undefined;
@@ -124,43 +208,67 @@ function App() {
     }
 
     try {
-      await switchToSepolia();
+      if (direction === "forward") {
+        await switchToSepolia();
+      } else {
+        await switchToNeoX();
+      }
 
       const provider = new BrowserProvider(window.ethereum);
       const signer = await provider.getSigner();
       const owner = await signer.getAddress();
       const parsed = parseUnits(amount, 6);
 
-      const usdc = new Contract(config.sepoliaUsdc, erc20Abi, signer);
-      const allowance = await usdc.allowance(owner, config.sourceBridge);
+      const token = new Contract(direction === "forward" ? config.sepoliaUsdc : config.xusdc, erc20Abi, signer);
+      const spender = direction === "forward" ? config.sourceBridge : config.destinationBridge;
+      const allowance = await token.allowance(owner, spender);
       if (allowance < parsed) {
         setStatus("approving");
-        const approveTx = await usdc.approve(config.sourceBridge, parsed);
+        const approveTx = await token.approve(spender, parsed);
         await approveTx.wait();
       }
 
       setStatus("bridging");
-      const sourceBridge = new Contract(config.sourceBridge, sourceBridgeAbi, signer);
-      const fee = await sourceBridge.getBridgeFee(parsed, owner, targetRecipient);
-      const tx = await sourceBridge.bridge(parsed, targetRecipient, { value: fee });
-      setNow(Date.now());
-      setTracker({ submittedAt: Date.now(), sourceTxHash: tx.hash, messageId: "" });
+      const bridgeContract = new Contract(
+        direction === "forward" ? config.sourceBridge : config.destinationBridge,
+        direction === "forward" ? sourceBridgeAbi : destinationBridgeAbi,
+        signer
+      );
+      const fee =
+        direction === "forward"
+          ? await bridgeContract.getBridgeFee(parsed, owner, targetRecipient)
+          : await bridgeContract.getReturnFee(parsed, owner, targetRecipient);
+      const tx =
+        direction === "forward"
+          ? await bridgeContract.bridge(parsed, targetRecipient, { value: fee })
+          : await bridgeContract.bridgeBack(parsed, targetRecipient, { value: fee });
+      const submittedAt = Date.now();
+      const pendingTracker = {
+        id: tx.hash,
+        direction,
+        amount,
+        submittedAt,
+        originTxHash: tx.hash,
+        messageId: ""
+      };
+      setNow(submittedAt);
+      saveTracker(pendingTracker);
 
       const receipt = await tx.wait();
       const event = receipt.logs
         .map((log: any) => {
           try {
-            return sourceBridge.interface.parseLog(log);
+            return bridgeContract.interface.parseLog(log);
           } catch {
             return null;
           }
         })
-        .find((parsedLog: any) => parsedLog?.name === "BridgeRequested");
+        .find((parsedLog: any) => parsedLog?.name === (direction === "forward" ? "BridgeRequested" : "ReturnRequested"));
 
       if (event) {
         const nextMessageId = event.args.messageId;
         setMessageId(nextMessageId);
-        setTracker((current) => current && { ...current, messageId: nextMessageId });
+        updateTracker(tx.hash, { messageId: nextMessageId });
       }
       setStatus("done");
       await refreshBalances();
@@ -169,10 +277,10 @@ function App() {
       setError(reason);
       setStatus("idle");
     }
-  }, [amount, ready, refreshBalances, switchToSepolia, targetRecipient]);
+  }, [amount, direction, ready, refreshBalances, saveTracker, switchToNeoX, switchToSepolia, targetRecipient, updateTracker]);
 
   const ccipUrl = messageId ? `https://ccip.chain.link/msg/${messageId}` : "";
-  const sourceTxUrl = tracker?.sourceTxHash ? `${SEPOLIA.explorer}/tx/${tracker.sourceTxHash}` : "";
+  const sourceTxUrl = tracker?.originTxHash ? `${originExplorer(tracker.direction)}/tx/${tracker.originTxHash}` : "";
 
   return (
     <main>
@@ -180,7 +288,7 @@ function App() {
         <header className="topbar">
           <div>
             <p className="eyebrow">CCIP test bridge</p>
-            <h1>USDC to xUSDC</h1>
+            <h1>USDC <span>{"<->"}</span> xUSDC</h1>
           </div>
           <button className="wallet" onClick={connect}>
             <Wallet size={18} />
@@ -190,15 +298,24 @@ function App() {
 
         <div className="grid">
           <section className="panel bridge-panel">
+            <div className="direction-tabs" aria-label="Bridge direction">
+              <button className={direction === "forward" ? "active" : ""} onClick={() => setDirection("forward")}>
+                To Neo X
+              </button>
+              <button className={direction === "reverse" ? "active" : ""} onClick={() => setDirection("reverse")}>
+                To Sepolia
+              </button>
+            </div>
+
             <div className="route">
               <div>
                 <span>From</span>
-                <strong>Ethereum Sepolia</strong>
+                <strong>{route.from}</strong>
               </div>
               <ArrowRightLeft aria-hidden size={22} />
               <div>
                 <span>To</span>
-                <strong>Neo X T4</strong>
+                <strong>{route.to}</strong>
               </div>
             </div>
 
@@ -206,7 +323,7 @@ function App() {
               Amount
               <div className="input-row">
                 <input inputMode="decimal" value={amount} onChange={(event) => setAmount(event.target.value)} placeholder="0.00" />
-                <span>USDC</span>
+                <span>{route.token}</span>
               </div>
             </label>
 
@@ -217,7 +334,7 @@ function App() {
 
             <button className="primary" onClick={bridge} disabled={!account || status === "approving" || status === "bridging"}>
               {(status === "approving" || status === "bridging") && <Loader2 className="spin" size={18} />}
-              {status === "approving" ? "Approving USDC" : status === "bridging" ? "Sending CCIP message" : "Bridge to Neo X"}
+              {status === "approving" ? `Approving ${route.token}` : status === "bridging" ? "Sending CCIP message" : route.button}
             </button>
 
             {messageId && (
@@ -238,7 +355,7 @@ function App() {
                 </div>
                 <div className="tracker-links">
                   <a href={sourceTxUrl} target="_blank" rel="noreferrer">
-                    Sepolia tx
+                    {originLabel(tracker.direction)}
                     <ExternalLink size={15} />
                   </a>
                   {tracker.messageId ? (
@@ -281,6 +398,32 @@ function App() {
               <li className={config.xusdc ? "ok" : ""}>xUSDC token</li>
               <li className={NEO_X_T4.rpcUrl ? "ok" : ""}>Neo X RPC</li>
             </ul>
+
+            <h2 className="activity-title">Activity</h2>
+            <div className="history-list">
+              {history.length === 0 ? (
+                <p className="empty-state">No transactions yet</p>
+              ) : (
+                history.map((item) => (
+                  <div className="history-item" key={item.id}>
+                    <div>
+                      <strong>{item.amount} {item.direction === "forward" ? "USDC" : "xUSDC"}</strong>
+                      <span>{routeLabel(item.direction)} - {formatSubmittedAt(item.submittedAt)}</span>
+                    </div>
+                    <div className="history-links">
+                      <a href={`${originExplorer(item.direction)}/tx/${item.originTxHash}`} target="_blank" rel="noreferrer">
+                        Origin
+                      </a>
+                      {item.messageId && (
+                        <a href={`https://ccip.chain.link/msg/${item.messageId}`} target="_blank" rel="noreferrer">
+                          CCIP
+                        </a>
+                      )}
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
           </aside>
         </div>
       </section>

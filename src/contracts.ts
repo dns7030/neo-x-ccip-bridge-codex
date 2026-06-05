@@ -36,3 +36,9 @@ export const sourceBridgeAbi = [
   "function destinationReceiver() view returns (address)",
   "event BridgeRequested(bytes32 indexed messageId,address indexed sender,address indexed recipient,uint256 amount,uint256 fee)"
 ];
+
+export const destinationBridgeAbi = [
+  "function bridgeBack(uint256 amount,address recipient) returns (bytes32)",
+  "function getReturnFee(uint256 amount,address sender,address recipient) view returns (uint256)",
+  "event ReturnRequested(bytes32 indexed messageId,address indexed sender,address indexed recipient,uint256 amount,uint256 fee)"
+];

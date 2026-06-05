@@ -73,6 +73,27 @@ h2 {
   gap: 22px;
 }
 
+.direction-tabs {
+  background: rgba(24, 32, 43, 0.06);
+  border-radius: 8px;
+  display: grid;
+  gap: 4px;
+  grid-template-columns: 1fr 1fr;
+  padding: 4px;
+}
+
+.direction-tabs button {
+  background: transparent;
+  color: #667085;
+  min-height: 40px;
+}
+
+.direction-tabs button.active {
+  background: white;
+  box-shadow: 0 4px 18px rgba(24, 32, 43, 0.1);
+  color: #006c58;
+}
+
 .route {
   align-items: center;
   background: #18202b;
@@ -266,6 +287,63 @@ button:disabled {
 
 .status-list li.ok {
   color: #006c58;
+}
+
+.activity-title {
+  margin-top: 28px;
+}
+
+.history-list {
+  display: grid;
+  gap: 10px;
+}
+
+.empty-state {
+  color: #667085;
+  font-size: 13px;
+  font-weight: 700;
+  margin: 0;
+}
+
+.history-item {
+  border: 1px solid rgba(24, 32, 43, 0.1);
+  border-radius: 8px;
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+}
+
+.history-item strong,
+.history-item span {
+  display: block;
+}
+
+.history-item strong {
+  font-size: 14px;
+}
+
+.history-item span {
+  color: #667085;
+  font-size: 12px;
+  font-weight: 700;
+  margin-top: 3px;
+}
+
+.history-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.history-links a {
+  background: rgba(0, 139, 115, 0.1);
+  border-radius: 8px;
+  color: #006c58;
+  font-size: 12px;
+  font-weight: 800;
+  min-height: 30px;
+  padding: 7px 10px;
+  text-decoration: none;
 }
 
 .spin {
