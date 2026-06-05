@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { ArrowRightLeft, CheckCircle2, CircleAlert, ExternalLink, Loader2, Wallet } from "lucide-react";
+import { ArrowRightLeft, CheckCircle2, CircleAlert, Clock, ExternalLink, Loader2, Wallet } from "lucide-react";
 import { BrowserProvider, Contract, JsonRpcProvider, formatUnits, parseUnits } from "ethers";
 import { NEO_X_T4, SEPOLIA, config, erc20Abi, sourceBridgeAbi } from "./contracts";
 import "./styles.css";
@@ -13,12 +13,33 @@ declare global {
 
 type TxState = "idle" | "approving" | "bridging" | "done";
 
+type Tracker = {
+  submittedAt: number;
+  sourceTxHash: string;
+  messageId: string;
+};
+
 function shortAddress(address: string) {
   return `${address.slice(0, 6)}...${address.slice(-4)}`;
 }
 
 function isAddressLike(value: string) {
   return /^0x[a-fA-F0-9]{40}$/.test(value);
+}
+
+function formatElapsed(startedAt: number, now: number) {
+  const seconds = Math.max(0, Math.floor((now - startedAt) / 1000));
+  const minutes = Math.floor(seconds / 60);
+  const remainder = seconds % 60;
+  return `${minutes}:${remainder.toString().padStart(2, "0")}`;
+}
+
+function formatSubmittedAt(value: number) {
+  return new Intl.DateTimeFormat(undefined, {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit"
+  }).format(value);
 }
 
 function App() {
@@ -28,6 +49,8 @@ function App() {
   const [sourceBalance, setSourceBalance] = useState("0");
   const [destinationBalance, setDestinationBalance] = useState("0");
   const [messageId, setMessageId] = useState("");
+  const [tracker, setTracker] = useState<Tracker | null>(null);
+  const [now, setNow] = useState(Date.now());
   const [status, setStatus] = useState<TxState>("idle");
   const [error, setError] = useState("");
 
@@ -77,9 +100,16 @@ function App() {
     refreshBalances().catch(() => undefined);
   }, [refreshBalances]);
 
+  useEffect(() => {
+    if (!tracker || status === "done") return undefined;
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [status, tracker]);
+
   const bridge = useCallback(async () => {
     setError("");
     setMessageId("");
+    setTracker(null);
     if (!ready) {
       setError("Bridge addresses are missing. Set the VITE_* env vars before deploying the frontend.");
       return;
@@ -93,42 +123,56 @@ function App() {
       return;
     }
 
-    await switchToSepolia();
+    try {
+      await switchToSepolia();
 
-    const provider = new BrowserProvider(window.ethereum);
-    const signer = await provider.getSigner();
-    const owner = await signer.getAddress();
-    const parsed = parseUnits(amount, 6);
+      const provider = new BrowserProvider(window.ethereum);
+      const signer = await provider.getSigner();
+      const owner = await signer.getAddress();
+      const parsed = parseUnits(amount, 6);
 
-    const usdc = new Contract(config.sepoliaUsdc, erc20Abi, signer);
-    const allowance = await usdc.allowance(owner, config.sourceBridge);
-    if (allowance < parsed) {
-      setStatus("approving");
-      const approveTx = await usdc.approve(config.sourceBridge, parsed);
-      await approveTx.wait();
+      const usdc = new Contract(config.sepoliaUsdc, erc20Abi, signer);
+      const allowance = await usdc.allowance(owner, config.sourceBridge);
+      if (allowance < parsed) {
+        setStatus("approving");
+        const approveTx = await usdc.approve(config.sourceBridge, parsed);
+        await approveTx.wait();
+      }
+
+      setStatus("bridging");
+      const sourceBridge = new Contract(config.sourceBridge, sourceBridgeAbi, signer);
+      const fee = await sourceBridge.getBridgeFee(parsed, owner, targetRecipient);
+      const tx = await sourceBridge.bridge(parsed, targetRecipient, { value: fee });
+      setNow(Date.now());
+      setTracker({ submittedAt: Date.now(), sourceTxHash: tx.hash, messageId: "" });
+
+      const receipt = await tx.wait();
+      const event = receipt.logs
+        .map((log: any) => {
+          try {
+            return sourceBridge.interface.parseLog(log);
+          } catch {
+            return null;
+          }
+        })
+        .find((parsedLog: any) => parsedLog?.name === "BridgeRequested");
+
+      if (event) {
+        const nextMessageId = event.args.messageId;
+        setMessageId(nextMessageId);
+        setTracker((current) => current && { ...current, messageId: nextMessageId });
+      }
+      setStatus("done");
+      await refreshBalances();
+    } catch (caught) {
+      const reason = caught instanceof Error ? caught.message : "Transaction failed.";
+      setError(reason);
+      setStatus("idle");
     }
-
-    setStatus("bridging");
-    const sourceBridge = new Contract(config.sourceBridge, sourceBridgeAbi, signer);
-    const fee = await sourceBridge.getBridgeFee(parsed, owner, targetRecipient);
-    const tx = await sourceBridge.bridge(parsed, targetRecipient, { value: fee });
-    const receipt = await tx.wait();
-    const event = receipt.logs
-      .map((log: any) => {
-        try {
-          return sourceBridge.interface.parseLog(log);
-        } catch {
-          return null;
-        }
-      })
-      .find((parsedLog: any) => parsedLog?.name === "BridgeRequested");
-
-    if (event) setMessageId(event.args.messageId);
-    setStatus("done");
-    await refreshBalances();
   }, [amount, ready, refreshBalances, switchToSepolia, targetRecipient]);
 
   const ccipUrl = messageId ? `https://ccip.chain.link/msg/${messageId}` : "";
+  const sourceTxUrl = tracker?.sourceTxHash ? `${SEPOLIA.explorer}/tx/${tracker.sourceTxHash}` : "";
 
   return (
     <main>
@@ -182,6 +226,31 @@ function App() {
                 Track CCIP message
                 <ExternalLink size={16} />
               </a>
+            )}
+            {tracker && (
+              <div className="tracker">
+                <div className="tracker-head">
+                  <span>
+                    <Clock size={16} />
+                    Submitted {formatSubmittedAt(tracker.submittedAt)}
+                  </span>
+                  <strong>{formatElapsed(tracker.submittedAt, now)}</strong>
+                </div>
+                <div className="tracker-links">
+                  <a href={sourceTxUrl} target="_blank" rel="noreferrer">
+                    Sepolia tx
+                    <ExternalLink size={15} />
+                  </a>
+                  {tracker.messageId ? (
+                    <a href={`https://ccip.chain.link/msg/${tracker.messageId}`} target="_blank" rel="noreferrer">
+                      CCIP message
+                      <ExternalLink size={15} />
+                    </a>
+                  ) : (
+                    <span>Waiting for message ID</span>
+                  )}
+                </div>
+              </div>
             )}
             {error && (
               <p className="error">

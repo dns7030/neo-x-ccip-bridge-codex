@@ -176,6 +176,55 @@ button:disabled {
   color: #006c58;
 }
 
+.tracker {
+  border: 1px solid rgba(24, 32, 43, 0.12);
+  border-radius: 8px;
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+}
+
+.tracker-head,
+.tracker-head span,
+.tracker-links {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+}
+
+.tracker-head {
+  justify-content: space-between;
+}
+
+.tracker-head span,
+.tracker-links span {
+  color: #667085;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.tracker-head strong {
+  color: #006c58;
+  font-variant-numeric: tabular-nums;
+}
+
+.tracker-links {
+  flex-wrap: wrap;
+}
+
+.tracker-links a {
+  align-items: center;
+  background: rgba(0, 139, 115, 0.1);
+  border-radius: 8px;
+  color: #006c58;
+  display: inline-flex;
+  font-weight: 800;
+  gap: 6px;
+  min-height: 36px;
+  padding: 0 12px;
+  text-decoration: none;
+}
+
 .error {
   align-items: center;
   color: #a13b2f;
