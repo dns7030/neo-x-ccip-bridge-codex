@@ -1,0 +1,50 @@
+{
+  "name": "neo-x-ccip-usdc-bridge",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "build": "npm run compile && npm run build:web",
+    "build:web": "vite build",
+    "compile": "hardhat compile",
+    "dev": "vite --host 0.0.0.0",
+    "start": "vite preview --host 0.0.0.0 --port ${PORT:-4173}",
+    "check:wallet": "tsx scripts/check-wallet.ts",
+    "deploy:source": "hardhat run scripts/deploy-source.ts --network sepolia",
+    "deploy:destination": "hardhat run scripts/deploy-destination.ts --network neoXT4",
+    "deploy:source:direct": "tsx scripts/deploy-direct.ts source",
+    "deploy:destination:direct": "tsx scripts/deploy-direct.ts destination",
+    "deploy:source:v2": "tsx scripts/deploy-direct.ts source-v2",
+    "deploy:destination:v2": "tsx scripts/deploy-direct.ts destination-v2",
+    "configure:source:direct": "tsx scripts/deploy-direct.ts configure-source",
+    "configure:destination:direct": "tsx scripts/deploy-direct.ts configure-destination",
+    "configure:source:v2": "tsx scripts/deploy-direct.ts configure-source-v2",
+    "configure:destination:v2": "tsx scripts/deploy-direct.ts configure-destination-v2",
+    "smoke:bridge": "tsx scripts/bridge-smoke.ts",
+    "smoke:v2:forward": "tsx scripts/bridge-v2-smoke.ts forward",
+    "smoke:v2:back": "tsx scripts/bridge-v2-smoke.ts back",
+    "configure:source": "hardhat run scripts/configure-source.ts --network sepolia",
+    "configure:destination": "hardhat run scripts/configure-destination.ts --network neoXT4",
+    "test": "hardhat test"
+  },
+  "dependencies": {
+    "@chainlink/contracts-ccip": "^1.6.1",
+    "@openzeppelin/contracts": "^5.0.2",
+    "@vitejs/plugin-react": "^5.0.0",
+    "ethers": "^6.13.5",
+    "vite": "^6.0.11",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "lucide-react": "^0.468.0"
+  },
+  "devDependencies": {
+    "@nomicfoundation/hardhat-ethers": "^3.0.8",
+    "@nomicfoundation/hardhat-toolbox": "^5.0.0",
+    "@types/node": "^22.10.5",
+    "@types/react": "^19.0.2",
+    "@types/react-dom": "^19.0.2",
+    "hardhat": "^2.22.18",
+    "ts-node": "^10.9.2",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}
