@@ -80,6 +80,19 @@ function mergeHistory(...lists: Tracker[][]) {
   return [...byId.values()].sort((a, b) => b.submittedAt - a.submittedAt).slice(0, 12);
 }
 
+async function ensureAllowance(token: Contract, owner: string, spender: string, amount: bigint) {
+  const current = await token.allowance(owner, spender);
+  if (current >= amount) return;
+
+  const approveTx = await token.approve(spender, amount);
+  await approveTx.wait();
+
+  const updated = await token.allowance(owner, spender);
+  if (updated < amount) {
+    throw new Error("Token approval is still below the bridge amount. Please approve again or lower the amount.");
+  }
+}
+
 function App() {
   const [account, setAccount] = useState("");
   const [direction, setDirection] = useState<Direction>("forward");
@@ -283,12 +296,8 @@ function App() {
 
       const token = new Contract(direction === "forward" ? config.sepoliaUsdc : config.xusdc, erc20Abi, signer);
       const spender = direction === "forward" ? config.sourceBridge : config.destinationBridge;
-      const allowance = await token.allowance(owner, spender);
-      if (allowance < parsed) {
-        setStatus("approving");
-        const approveTx = await token.approve(spender, parsed);
-        await approveTx.wait();
-      }
+      setStatus("approving");
+      await ensureAllowance(token, owner, spender, parsed);
 
       setStatus("bridging");
       const bridgeContract = new Contract(
@@ -335,6 +344,11 @@ function App() {
       await refreshBalances();
     } catch (caught) {
       const reason = caught instanceof Error ? caught.message : "Transaction failed.";
+      if (reason.includes("transfer amount exceeds allowance")) {
+        setError("Token approval is lower than the bridge amount. Approve the token first, then submit the bridge again.");
+        setStatus("idle");
+        return;
+      }
       setError(reason);
       setStatus("idle");
     }
